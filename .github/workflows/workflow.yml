@@ -1,0 +1,80 @@
+name: Run Llama
+
+on:
+  workflow_dispatch:
+
+jobs:
+  prepare-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Cache GGUF Model
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: gemma-4-E2B-it-Q4_K_M.gguf
+          key: gemma-model-${{ runner.os }}-v1
+
+      - name: Download GGUF Model if not cached
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        run: |
+          echo "Model cache miss. Downloading GGUF model from Hugging Face..."
+          wget -q --show-progress https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf -O gemma-4-E2B-it-Q4_K_M.gguf
+
+      - name: Cache or Build llama-cli
+        run: |
+          if [ -f "./llama-cli" ]; then
+            echo "llama-cli already exists in repository. Skipping build."
+          else
+            echo "llama-cli not found in repository. Installing build tools and compiling..."
+            sudo apt update && sudo apt install -y cmake build-essential git
+            git clone --depth 1 https://github.com/ggerganov/llama.cpp
+            cmake -B llama.cpp/build llama.cpp
+            cmake --build llama.cpp/build --target llama-cli -j 2
+            cp llama.cpp/build/bin/llama-cli ./
+            rm -rf llama.cpp
+            chmod +x llama-cli
+            
+            echo "Committing and pushing llama-cli to repository..."
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add llama-cli
+            git commit -m "chore: cache compiled llama-cli [automated]"
+            git push origin HEAD:main
+          fi
+
+  run-server:
+    needs: prepare-assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Restore GGUF Model Cache
+        uses: actions/cache@v4
+        with:
+          path: gemma-4-E2B-it-Q4_K_M.gguf
+          key: gemma-model-${{ runner.os }}-v1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Start FastAPI Server
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+          GITHUB_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_ORG: ${{ secrets.GH_ORG }}
+        run: |
+          python -u server.py
