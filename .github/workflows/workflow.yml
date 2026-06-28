@@ -16,14 +16,14 @@ jobs:
         id: cache-model
         uses: actions/cache@v4
         with:
-          path: gemma-4-E2B-it-Q4_K_M.gguf
-          key: gemma-model-${{ runner.os }}-v1
+          path: gemma-4-12b-it-UD-Q4_K_XL.gguf
+          key: gemma-4-12b-model-${{ runner.os }}-v1
 
       - name: Download GGUF Model if not cached
         if: steps.cache-model.outputs.cache-hit != 'true'
         run: |
           echo "Model cache miss. Downloading GGUF model from Hugging Face..."
-          wget -q --show-progress https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf -O gemma-4-E2B-it-Q4_K_M.gguf
+          wget -q --show-progress https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/gemma-4-12b-it-UD-Q4_K_XL.gguf -O gemma-4-12b-it-UD-Q4_K_XL.gguf
 
       - name: Cache or Build llama-cli
         run: |
@@ -59,8 +59,8 @@ jobs:
       - name: Restore GGUF Model Cache
         uses: actions/cache@v4
         with:
-          path: gemma-4-E2B-it-Q4_K_M.gguf
-          key: gemma-model-${{ runner.os }}-v1
+          path: gemma-4-12b-it-UD-Q4_K_XL.gguf
+          key: gemma-4-12b-model-${{ runner.os }}-v1
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
