@@ -62,6 +62,15 @@ jobs:
           path: gemma-4-12b-it-UD-Q4_K_XL.gguf
           key: gemma-4-12b-model-${{ runner.os }}-v1
 
+      - name: Create Swap Space for 12B Model
+        run: |
+          echo "Allocating 10GB swap file..."
+          sudo fallocate -l 10G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
