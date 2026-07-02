@@ -7,6 +7,7 @@ import subprocess
 import uvicorn
 import threading
 from typing import Optional
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from github import Github, Auth
@@ -207,15 +208,54 @@ def startup_event() -> None:
     )
     t.start()
 
-    # --- Model Warmup ---
-    # Run a trivial query before exposing the tunnel so that model weights
-    # are fully loaded into memory and the KV cache is initialised.
-    print("[Warmup] Loading model weights and warming up inference engine...", flush=True)
+    # --- Model Warmup & Global Prefix Pre-caching ---
+    print("[Warmup] Warming up model weights and building global prefix cache...", flush=True)
     try:
-        warmup_result: str = run_model_query("Hi", jid=None)
-        print(f"[Warmup] Model ready. Warmup response: {warmup_result[:60].strip()!r}", flush=True)
+        import re
+        import pickle
+        from model import get_llm, STATES_DIR
+        
+        system_path = Path("system.md")
+        persona_path = Path("persona.json")
+        kb_path = Path("kb.json")
+        
+        if system_path.exists() and persona_path.exists() and kb_path.exists():
+            system_prompt = system_path.read_text(encoding="utf-8").strip()
+            persona = persona_path.read_text(encoding="utf-8").strip()
+            kb = kb_path.read_text(encoding="utf-8").strip()
+            
+            # Strip tool declarations
+            clean_system = re.sub(r"## TOOL USE[\s\S]*?(?=##|$)", "", system_prompt)
+            
+            # Format raw prefix
+            prefix_text = (
+                "<start_of_turn>user\nYou are a helpful assistant.\n\n"
+                f"System Prompt:\n{clean_system}\n\n"
+                f"Persona:\n{persona}\n\n"
+                f"Knowledge Base (Authoritative Facts):\n{kb}\n\n"
+                "Conversation History:"
+            )
+            
+            llm = get_llm()
+            prefix_tokens = llm.tokenize(prefix_text.encode("utf-8"))
+            
+            llm.reset()
+            llm.eval(prefix_tokens)
+            
+            state_file = STATES_DIR / "global_prefix.state"
+            tokens_file = STATES_DIR / "global_prefix.tokens"
+            
+            state_file.write_bytes(llm.save_state())
+            with open(tokens_file, "wb") as tf:
+                pickle.dump(prefix_tokens, tf)
+                
+            print(f"[Warmup] Ready. Pre-compiled global prefix cache ({len(prefix_tokens)} tokens) saved to disk.", flush=True)
+        else:
+            print("[Warmup] Warning: Warmup files system.md/persona.json/kb.json not found on disk. Performing fallback query...", flush=True)
+            warmup_res = run_model_query("Hi")
+            print(f"[Warmup] Fallback query completed: {warmup_res[:40].strip()!r}", flush=True)
     except Exception as warmup_err:
-        print(f"[Warmup] Warning: warmup query failed: {warmup_err}", flush=True)
+        print(f"[Warmup] Warning: global prefix caching failed: {warmup_err}", flush=True)
 
     # Start Cloudflare Quick Tunnel
     public_url: Optional[str] = start_cloudflare_tunnel()
